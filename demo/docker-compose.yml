@@ -1,0 +1,25 @@
+services:
+  zeroclaw:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    container_name: zeroclaw-demo
+    init: true
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      RUST_LOG: "${RUST_LOG:-zeroclaw=info,zeroclaw_hardware=info,esp32_sim=info}"
+    volumes:
+      # Mount the example config. Copy to zeroclaw.toml locally if you want to edit.
+      - ./zeroclaw.toml.example:/app/data/config/config.toml:ro
+    # The simulator (esp32_sim) is the default process.
+    # This harness is part of the split/port of the original #6148 bundle.
+    # Full end-to-end requires the small PRs for dev-sim, esp32_sim, and smartroom tools.
+    #
+    # To interact:
+    #     ./demo/run-sim.sh
+    #     ./demo/run-zeroclaw.sh --agent demo "turn on the reading lamp"
+    #
+    # The command should flow: agent → smartroom tool → simulator → visualizer update.

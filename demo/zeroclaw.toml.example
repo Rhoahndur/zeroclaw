@@ -1,0 +1,78 @@
+# ZeroClaw demo config — ESP32 Smart Room (adapted from original #6148 bundle)
+#
+# This harness is part of the split/port of the original big PR.
+# It depends on the small PRs for:
+# - dev-sim (for simulator paths)
+# - esp32_sim example
+# - smartroom named-device tools (set_device / read_device)
+#
+# The agent can ONLY use hardware tools on the simulated ESP32.
+# Everything else is locked down.
+#
+# To run the end-to-end demo:
+#     ./demo/run-sim.sh
+#     ./demo/run-zeroclaw.sh --agent demo "turn on the reading lamp"
+#
+# You should see the command flow through to the simulator and the visualizer update.
+
+# ─── Providers ─────────────────────────────────────────────────────────────
+# Primary: MiniMax (auth via MINIMAX_API_KEY env var).
+# Fallback: OpenRouter.
+
+default_provider = "minimax"
+
+[provider]
+base_url = "https://api.minimax.io/v1"
+model = "MiniMax-M2.7"
+temperature = 0.3
+max_tokens = 1024
+merge_system_into_user = true
+
+[provider.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+model = "minimax/minimax-m2.7"
+temperature = 0.3
+max_tokens = 1024
+
+# ─── Hardware peripherals ──────────────────────────────────────────────────
+# Only the smartroom tools on the simulated ESP32 board.
+
+[peripherals]
+enabled = true
+
+[[peripherals.boards]]
+board = "esp32"
+transport = "serial"
+path = "/tmp/zc-sim-esp32"
+baud = 115200
+
+# ─── Lock down all other surfaces ──────────────────────────────────────────
+[shell-tool]
+enabled = false
+
+[browser]
+enabled = false
+
+[web-search]
+enabled = false
+
+[http-request]
+enabled = false
+
+[mcp]
+enabled = false
+
+[transcription]
+enabled = false
+
+# ─── Safety ────────────────────────────────────────────────────────────────
+[autonomy]
+max_actions_per_hour = 60
+auto_approve = ["set_device", "read_device", "gpio_write", "gpio_read", "hardware_capabilities"]
+
+# ─── Agent (required for current CLI) ──────────────────────────────────────
+[agents.demo]
+model_provider = "minimax"
+
+# Telegram disabled by default (simulator-focused demo).
+
