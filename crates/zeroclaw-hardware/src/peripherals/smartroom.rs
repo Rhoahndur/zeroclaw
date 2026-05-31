@@ -139,8 +139,8 @@ impl Tool for ReadDeviceTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::Error::msg("missing device"))?;
 
-        let pin =
-            input_pin(device).ok_or_else(|| anyhow::Error::msg(format!("unknown input device: {}", device)))?;
+        let pin = input_pin(device)
+            .ok_or_else(|| anyhow::Error::msg(format!("unknown input device: {}", device)))?;
 
         let result = self
             .transport
