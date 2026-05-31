@@ -138,6 +138,12 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
+    // Optional first CLI argument to override the bind address (addresses review suggestion).
+    // Default is still 0.0.0.0:8080 for Docker demo convenience.
+    // Usage: cargo run --example esp32_sim --features "hardware dev-sim" -- 127.0.0.1:8080
+    let bind_addr = std::env::args().nth(1).unwrap_or_else(|| HTTP_BIND.to_string());
+    let http_bind = bind_addr.as_str();
+
     // 1. Spawn socat to create the pty pair with named symlinks.
     let mut socat = spawn_socat().context(
         "failed to start socat (install with `brew install socat` or `apt install socat`)",
@@ -170,7 +176,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    eprintln!("frontend ready: http://{}", HTTP_BIND);
+    eprintln!("frontend ready: http://{}", http_bind);
     eprintln!("ctrl+c to stop");
 
     tokio::select! {
@@ -318,7 +324,7 @@ async fn run_http_server(state: AppState) -> Result<()> {
         .route("/manual", post(manual_flip))
         .route("/ws", get(ws_handler))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(HTTP_BIND).await?;
+    let listener = tokio::net::TcpListener::bind(http_bind).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
