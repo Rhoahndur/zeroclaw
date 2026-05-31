@@ -144,7 +144,6 @@ async fn main() -> Result<()> {
     let bind_addr = std::env::args()
         .nth(1)
         .unwrap_or_else(|| HTTP_BIND.to_string());
-    let http_bind = bind_addr.as_str();
 
     // 1. Spawn socat to create the pty pair with named symlinks.
     let mut socat = spawn_socat().context(
@@ -166,9 +165,12 @@ async fn main() -> Result<()> {
     let http_state = state.clone();
     let pty_state = state.clone();
 
-    let http_handle = tokio::spawn(async move {
-        if let Err(e) = run_http_server(http_state).await {
-            eprintln!("http server crashed: {}", e);
+    let http_handle = tokio::spawn({
+        let bind_addr = bind_addr.clone();
+        async move {
+            if let Err(e) = run_http_server(http_state, bind_addr).await {
+                eprintln!("http server crashed: {}", e);
+            }
         }
     });
 
@@ -178,7 +180,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    eprintln!("frontend ready: http://{}", http_bind);
+    eprintln!("frontend ready: http://{}", bind_addr);
     eprintln!("ctrl+c to stop");
 
     tokio::select! {
@@ -319,14 +321,14 @@ async fn handle_request(req: Request, state: &AppState) -> Response {
     }
 }
 
-async fn run_http_server(state: AppState) -> Result<()> {
+async fn run_http_server(state: AppState, bind_addr: String) -> Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/state", get(get_state))
         .route("/manual", post(manual_flip))
         .route("/ws", get(ws_handler))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(http_bind).await?;
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
