@@ -32,47 +32,76 @@ only the smartroom tools (`set_device` / `read_device`) plus raw `gpio_*` and
 `hardware_capabilities` are available. All other surfaces (shell, browser,
 web search, MCP, etc.) are disabled. The container provides defence in depth.
 
-## Prerequisites
+## Low-storage / MacBook Air development path (recommended for limited disk)
 
-- Docker Desktop (tested on Docker 29 / Compose v2.40)
-- A MiniMax API key (https://www.minimax.io/platform) **or** OpenRouter key
-
-## Setup (one-time)
+If you cannot allocate 60-80+ GB to Docker Desktop, test the vignette directly on your host instead. This is much lighter and lets you iterate quickly.
 
 ```bash
-# 1. Configure secrets
+# 1. One-time setup
 cp demo/.env.template demo/.env
-$EDITOR demo/.env       # paste MINIMAX_API_KEY=msk-...
+$EDITOR demo/.env          # put your MINIMAX_API_KEY
 
-# 2. Build the image (5-10 min on first build)
+# 2. Install socat if missing (required by the simulator)
+brew install socat
+
+# 3. Ensure demo config exists
+mkdir -p demo/data/config
+cp -n demo/zeroclaw.toml.example demo/data/config/config.toml || true
+
+# 4. Run the simulator + visualizer (in terminal 1)
+./demo/run-sim-host.sh
+
+# Wait for "frontend ready: http://127.0.0.1:8080", then open it.
+
+# 5. In another terminal, run the agent (terminal 2)
+./demo/run-agent-host.sh
+```
+
+Then paste the system primer from `demo/PROMPTS.md` and use natural language exactly as in the Docker path.
+
+This gives you the full functional vignette (smartroom tools → pty → simulator → live SVG) with far less disk pressure.
+
+## Packaged demo (Docker) – requires decent disk
+
+Use this path when you want the one-command "everything in a container" experience for demos or sharing.
+
+**Requirements**
+- Docker Desktop with **at least 60-80 GB** allocated to the disk image (see Settings → Resources)
+- A MiniMax or OpenRouter key
+
+**One-time setup**
+
+```bash
+cp demo/.env.template demo/.env
+$EDITOR demo/.env
+```
+
+**Build (heavy first time)**
+
+```bash
 docker compose -f demo/docker-compose.yml build
 ```
 
-## Run (two terminals)
+See the "Run (two terminals)" section below.
+
+## Run (two terminals) – Docker packaged path
 
 **Terminal 1 — simulator + frontend:**
 ```bash
 ./demo/run-sim.sh
-# or:  cd demo && docker compose up
 ```
-Wait for `frontend ready: http://127.0.0.1:8080` then open that URL.
+Wait for `frontend ready: http://127.0.0.1:8080` then open it.
 
-**Terminal 2 — interactive chat with the agent:**
+**Terminal 2 — interactive chat:**
 ```bash
 ./demo/run-zeroclaw.sh
-# or:  cd demo && docker compose exec zeroclaw zeroclaw agent --config /app/zeroclaw.toml
 ```
 
-When the chat prompt appears, paste the system primer:
+Paste the (updated) system primer from `demo/PROMPTS.md`, then use natural language.
 
-> *"You control GPIO pins on a simulated ESP32 in a smart room. Pin map: 12=reading lamp, 13=overhead light, 14=heater, 2=fan/status LED, 5=motion sensor (input only). Use the gpio_write and gpio_read tools to actuate. Respond ONLY by calling tools — do not describe actions in prose. After all tool calls, write one sentence summarizing what you did. Acknowledge by reading the motion sensor first."*
+The browser SVG updates live when the agent calls `set_device`.
 
-Then ask things like:
-- *"It's getting dark and chilly. I'm settling in to read for an hour."*
-- *"Going to bed now."*
-- *"Make it dramatic for a movie."*
-
-The browser room SVG updates in real time as the agent flips pins.
+> **Tip for low-storage machines:** Use the "Low-storage / MacBook Air development path" above instead of Docker. It runs the same vignette with `cargo run` directly on your host and uses far less disk.
 
 ## Public URL via ngrok (for the hackathon demo)
 
