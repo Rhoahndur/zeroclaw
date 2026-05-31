@@ -72,7 +72,9 @@ impl Tool for HardwareCapabilitiesTool {
                                 s.push_str(&format!("\n  description: {desc}"));
                             }
                             if let Some(devices) = parsed.get("pin_devices") {
-                                s.push_str(&format!("\n  pin_devices: {devices}"));
+                                // Use pretty-printed JSON so LLMs can more easily parse the named device mapping.
+                                let pretty = serde_json::to_string_pretty(devices).unwrap_or_else(|_| devices.to_string());
+                                s.push_str(&format!("\n  pin_devices: {pretty}"));
                             }
                             s
                         } else {
