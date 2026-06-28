@@ -58,10 +58,7 @@ mod tests {
         let line = br#"{"id":"2","cmd":"gpio_write","args":{"pin":13,"value":1}}"#;
         assert_eq!(
             Command::from_line(line),
-            Some(Command::GpioWrite {
-                pin: 13,
-                value: 1
-            })
+            Some(Command::GpioWrite { pin: 13, value: 1 })
         );
     }
 
@@ -70,10 +67,7 @@ mod tests {
         let line = br#"{"id":"2","cmd":"gpio_write","args":{"pin":13,"value":0}}"#;
         assert_eq!(
             Command::from_line(line),
-            Some(Command::GpioWrite {
-                pin: 13,
-                value: 0
-            })
+            Some(Command::GpioWrite { pin: 13, value: 0 })
         );
     }
 
@@ -89,8 +83,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_nested_cmd_without_top_level_cmd_returns_none() {
+        let line = br#"{"id":"1","args":{"cmd":"gpio_write","pin":2,"value":1}}"#;
+        assert_eq!(Command::from_line(line), None);
+    }
+
+    #[test]
+    fn parse_unknown_top_level_cmd_with_nested_gpio_write_returns_none() {
+        let line = br#"{"id":"1","cmd":"noop","args":{"cmd":"gpio_write","pin":2,"value":1}}"#;
+        assert_eq!(Command::from_line(line), None);
+    }
+
+    #[test]
+    fn parse_malformed_gpio_write_returns_none() {
+        let line = br#"{"id":"1","cmd":"gpio_write","args":{"pin":2,"value":1}"#;
+        assert_eq!(Command::from_line(line), None);
+    }
+
+    #[test]
     fn parse_gpio_read_missing_pin() {
         let line = br#"{"id":"3","cmd":"gpio_read"}"#;
-        assert_eq!(Command::from_line(line), Some(Command::GpioRead { pin: -1 }));
+        assert_eq!(
+            Command::from_line(line),
+            Some(Command::GpioRead { pin: -1 })
+        );
     }
 }

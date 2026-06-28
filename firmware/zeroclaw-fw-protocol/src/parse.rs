@@ -1,74 +1,99 @@
-/// Parse an integer value from a JSON key like `"pin":13` or `"value":1`.
+/// Parse an integer value from a top-level `args` object.
 ///
-/// Returns `None` if the key is not found.
+/// Returns `None` if the input is not a structurally valid JSON object, if
+/// `args` is missing, or if the key is not found directly inside `args`.
 pub fn parse_arg(line: &[u8], key: &[u8]) -> Option<i32> {
-    // Build the search pattern: `"key":`
-    let mut suffix: [u8; 32] = [0; 32];
-    suffix[0] = b'"';
-    let mut len = 1;
-    for (i, &k) in key.iter().enumerate() {
-        if i >= 30 {
-            break;
-        }
-        suffix[len] = k;
-        len += 1;
-    }
-    suffix[len] = b'"';
-    suffix[len + 1] = b':';
-    len += 2;
-    let suffix = &suffix[..len];
-
-    let line_len = line.len();
-    if line_len < len {
+    let mut i = skip_ws(line, 0);
+    if line.get(i) != Some(&b'{') {
         return None;
     }
-    for i in 0..=line_len - len {
-        if line[i..].starts_with(suffix) {
-            let rest = &line[i + len..];
-            let mut num: i32 = 0;
-            let mut neg = false;
-            let mut j = 0;
-            // Skip whitespace after colon
-            while j < rest.len() && rest[j] == b' ' {
-                j += 1;
-            }
-            if j < rest.len() && rest[j] == b'-' {
-                neg = true;
-                j += 1;
-            }
-            let start = j;
-            while j < rest.len() && rest[j].is_ascii_digit() {
-                num = num * 10 + (rest[j] - b'0') as i32;
-                j += 1;
-            }
-            if j == start {
+    i = skip_ws(line, i + 1);
+
+    let mut found = None;
+    let mut saw_args = false;
+
+    if line.get(i) == Some(&b'}') {
+        return finish(line, i + 1).then_some(found).flatten();
+    }
+
+    loop {
+        let (field, next) = parse_string(line, i)?;
+        i = skip_ws(line, next);
+        if line.get(i) != Some(&b':') {
+            return None;
+        }
+        i = skip_ws(line, i + 1);
+
+        if field == Some(b"args") {
+            if saw_args {
                 return None;
             }
-            return Some(if neg { -num } else { num });
+            saw_args = true;
+            let (arg, next) = parse_int_member_object(line, i, key)?;
+            found = arg;
+            i = next;
+        } else {
+            i = skip_value(line, i)?;
+        }
+
+        i = skip_ws(line, i);
+        match line.get(i) {
+            Some(b',') => i = skip_ws(line, i + 1),
+            Some(b'}') => return finish(line, i + 1).then_some(found).flatten(),
+            _ => return None,
         }
     }
-    None
 }
 
-/// Check if a JSON line contains `"cmd":"<cmd>"`.
+/// Check if a JSON line has a top-level `"cmd":"<cmd>"`.
 pub fn has_cmd(line: &[u8], cmd: &[u8]) -> bool {
-    let mut pat: [u8; 64] = [0; 64];
-    pat[0..7].copy_from_slice(b"\"cmd\":\"");
-    let clen = cmd.len().min(50);
-    pat[7..7 + clen].copy_from_slice(&cmd[..clen]);
-    pat[7 + clen] = b'"';
-    let pat = &pat[..8 + clen];
-
-    let line_len = line.len();
-    if line_len < pat.len() {
+    let mut i = skip_ws(line, 0);
+    if line.get(i) != Some(&b'{') {
         return false;
     }
-    for i in 0..=line_len - pat.len() {
-        if line[i..].starts_with(pat) {
-            return true;
+    i = skip_ws(line, i + 1);
+
+    let mut found = false;
+    let mut saw_cmd = false;
+
+    if line.get(i) == Some(&b'}') {
+        return finish(line, i + 1) && found;
+    }
+
+    loop {
+        let Some((field, next)) = parse_string(line, i) else {
+            return false;
+        };
+        i = skip_ws(line, next);
+        if line.get(i) != Some(&b':') {
+            return false;
+        }
+        i = skip_ws(line, i + 1);
+
+        if field == Some(b"cmd") {
+            if saw_cmd {
+                return false;
+            }
+            saw_cmd = true;
+            let Some((value, next)) = parse_string(line, i) else {
+                return false;
+            };
+            found = value == Some(cmd);
+            i = next;
+        } else {
+            let Some(next) = skip_value(line, i) else {
+                return false;
+            };
+            i = next;
+        }
+
+        i = skip_ws(line, i);
+        match line.get(i) {
+            Some(b',') => i = skip_ws(line, i + 1),
+            Some(b'}') => return finish(line, i + 1) && found,
+            _ => return false,
         }
     }
-    false
 }
 
 /// Extract the `"id"` string value from a JSON line into `out`.
@@ -93,6 +118,233 @@ pub fn copy_id<'a>(line: &[u8], out: &'a mut [u8]) -> usize {
     }
     out[0] = b'0';
     1
+}
+
+fn skip_ws(line: &[u8], mut i: usize) -> usize {
+    while matches!(line.get(i), Some(b' ' | b'\n' | b'\r' | b'\t')) {
+        i += 1;
+    }
+    i
+}
+
+fn finish(line: &[u8], i: usize) -> bool {
+    skip_ws(line, i) == line.len()
+}
+
+fn parse_string<'a>(line: &'a [u8], i: usize) -> Option<(Option<&'a [u8]>, usize)> {
+    if line.get(i) != Some(&b'"') {
+        return None;
+    }
+
+    let start = i + 1;
+    let mut j = start;
+    let mut simple = true;
+
+    while j < line.len() {
+        match line[j] {
+            b'"' => {
+                return Some((simple.then_some(&line[start..j]), j + 1));
+            }
+            b'\\' => {
+                simple = false;
+                j = skip_escape(line, j)?;
+            }
+            b if b < 0x20 => return None,
+            _ => j += 1,
+        }
+    }
+
+    None
+}
+
+fn skip_escape(line: &[u8], i: usize) -> Option<usize> {
+    let escaped = *line.get(i + 1)?;
+    match escaped {
+        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => Some(i + 2),
+        b'u' => {
+            for offset in 2..6 {
+                if !line.get(i + offset).is_some_and(|b| b.is_ascii_hexdigit()) {
+                    return None;
+                }
+            }
+            Some(i + 6)
+        }
+        _ => None,
+    }
+}
+
+fn skip_value(line: &[u8], i: usize) -> Option<usize> {
+    let i = skip_ws(line, i);
+    match line.get(i)? {
+        b'"' => parse_string(line, i).map(|(_, next)| next),
+        b'{' => skip_object(line, i),
+        b'[' => skip_array(line, i),
+        b't' => line[i..].starts_with(b"true").then_some(i + 4),
+        b'f' => line[i..].starts_with(b"false").then_some(i + 5),
+        b'n' => line[i..].starts_with(b"null").then_some(i + 4),
+        b'-' | b'0'..=b'9' => skip_number(line, i),
+        _ => None,
+    }
+}
+
+fn skip_object(line: &[u8], mut i: usize) -> Option<usize> {
+    if line.get(i) != Some(&b'{') {
+        return None;
+    }
+    i = skip_ws(line, i + 1);
+
+    if line.get(i) == Some(&b'}') {
+        return Some(i + 1);
+    }
+
+    loop {
+        let (_, next) = parse_string(line, i)?;
+        i = skip_ws(line, next);
+        if line.get(i) != Some(&b':') {
+            return None;
+        }
+        i = skip_value(line, i + 1)?;
+        i = skip_ws(line, i);
+
+        match line.get(i) {
+            Some(b',') => i = skip_ws(line, i + 1),
+            Some(b'}') => return Some(i + 1),
+            _ => return None,
+        }
+    }
+}
+
+fn skip_array(line: &[u8], mut i: usize) -> Option<usize> {
+    if line.get(i) != Some(&b'[') {
+        return None;
+    }
+    i = skip_ws(line, i + 1);
+
+    if line.get(i) == Some(&b']') {
+        return Some(i + 1);
+    }
+
+    loop {
+        i = skip_value(line, i)?;
+        i = skip_ws(line, i);
+
+        match line.get(i) {
+            Some(b',') => i = skip_ws(line, i + 1),
+            Some(b']') => return Some(i + 1),
+            _ => return None,
+        }
+    }
+}
+
+fn skip_number(line: &[u8], mut i: usize) -> Option<usize> {
+    if line.get(i) == Some(&b'-') {
+        i += 1;
+    }
+
+    match line.get(i)? {
+        b'0' => i += 1,
+        b'1'..=b'9' => {
+            i += 1;
+            while line.get(i).is_some_and(|b| b.is_ascii_digit()) {
+                i += 1;
+            }
+        }
+        _ => return None,
+    }
+
+    if line.get(i) == Some(&b'.') {
+        i += 1;
+        let start = i;
+        while line.get(i).is_some_and(|b| b.is_ascii_digit()) {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+    }
+
+    if matches!(line.get(i), Some(b'e' | b'E')) {
+        i += 1;
+        if matches!(line.get(i), Some(b'+' | b'-')) {
+            i += 1;
+        }
+        let start = i;
+        while line.get(i).is_some_and(|b| b.is_ascii_digit()) {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+    }
+
+    Some(i)
+}
+
+fn parse_int_member_object(line: &[u8], mut i: usize, key: &[u8]) -> Option<(Option<i32>, usize)> {
+    i = skip_ws(line, i);
+    if line.get(i) != Some(&b'{') {
+        return None;
+    }
+    i = skip_ws(line, i + 1);
+
+    let mut found = None;
+
+    if line.get(i) == Some(&b'}') {
+        return Some((found, i + 1));
+    }
+
+    loop {
+        let (field, next) = parse_string(line, i)?;
+        i = skip_ws(line, next);
+        if line.get(i) != Some(&b':') {
+            return None;
+        }
+        i = skip_ws(line, i + 1);
+
+        if field == Some(key) {
+            if found.is_some() {
+                return None;
+            }
+            let (value, next) = parse_i32(line, i)?;
+            found = Some(value);
+            i = next;
+        } else {
+            i = skip_value(line, i)?;
+        }
+
+        i = skip_ws(line, i);
+        match line.get(i) {
+            Some(b',') => i = skip_ws(line, i + 1),
+            Some(b'}') => return Some((found, i + 1)),
+            _ => return None,
+        }
+    }
+}
+
+fn parse_i32(line: &[u8], mut i: usize) -> Option<(i32, usize)> {
+    let neg = line.get(i) == Some(&b'-');
+    if neg {
+        i += 1;
+    }
+
+    let start = i;
+    let mut num = 0i64;
+
+    while let Some(digit) = line.get(i).and_then(|b| b.is_ascii_digit().then_some(*b)) {
+        num = num.checked_mul(10)?.checked_add((digit - b'0') as i64)?;
+        i += 1;
+    }
+
+    if i == start {
+        return None;
+    }
+
+    let signed = if neg { -num } else { num };
+    if signed < i32::MIN as i64 || signed > i32::MAX as i64 {
+        return None;
+    }
+
+    Some((signed as i32, i))
 }
 
 #[cfg(test)]
@@ -125,6 +377,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_arg_ignores_values_outside_top_level_args() {
+        let line = br#"{"cmd":"gpio_write","other":{"pin":2},"args":{}}"#;
+        assert_eq!(parse_arg(line, b"pin"), None);
+    }
+
+    #[test]
+    fn parse_arg_rejects_malformed_json() {
+        let line = br#"{"cmd":"gpio_write","args":{"pin":2}"#;
+        assert_eq!(parse_arg(line, b"pin"), None);
+    }
+
+    #[test]
     fn has_cmd_matches() {
         let line = br#"{"id":"1","cmd":"gpio_read","args":{"pin":5}}"#;
         assert!(has_cmd(line, b"gpio_read"));
@@ -143,6 +407,24 @@ mod tests {
     #[test]
     fn has_cmd_empty_line() {
         assert!(!has_cmd(b"", b"ping"));
+    }
+
+    #[test]
+    fn has_cmd_rejects_nested_cmd_without_top_level_cmd() {
+        let line = br#"{"id":"1","args":{"cmd":"gpio_write","pin":2,"value":1}}"#;
+        assert!(!has_cmd(line, b"gpio_write"));
+    }
+
+    #[test]
+    fn has_cmd_rejects_unknown_top_level_cmd_with_nested_match() {
+        let line = br#"{"id":"1","cmd":"noop","args":{"cmd":"gpio_write","pin":2,"value":1}}"#;
+        assert!(!has_cmd(line, b"gpio_write"));
+    }
+
+    #[test]
+    fn has_cmd_rejects_malformed_json() {
+        let line = br#"{"id":"1","cmd":"gpio_write","args":{"pin":2,"value":1}"#;
+        assert!(!has_cmd(line, b"gpio_write"));
     }
 
     #[test]
